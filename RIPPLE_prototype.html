@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RIPPLE — Infrastructure Cascade Simulator</title>
+<style>
+  :root{
+    --bg:#0b1220;
+    --panel:#121b2e;
+    --panel2:#0e1728;
+    --line:#22314d;
+    --text:#e7edf7;
+    --muted:#8ea0c2;
+    --accent:#3fd0c9;
+    --amber:#f5a742;
+    --red:#ef5b5b;
+    --green:#59c26f;
+    --shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:'Segoe UI', Roboto, Arial, sans-serif;overflow:hidden;}
+  #app{display:grid;grid-template-columns:1fr 340px;grid-template-rows:56px 1fr;height:100vh;}
+  header{grid-column:1/3;display:flex;align-items:center;justify-content:space-between;
+    padding:0 18px;background:var(--panel2);border-bottom:1px solid var(--line);}
+  header h1{font-size:16px;font-weight:600;letter-spacing:.3px;margin:0;}
+  header h1 span{color:var(--accent);}
+  header .controls{display:flex;gap:10px;align-items:center;}
+  button{background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:var(--accent);color:var(--accent);}
+  button:disabled{opacity:.35;cursor:not-allowed;}
+  button:disabled:hover{border-color:var(--line);color:var(--text);}
+  #stage-wrap{position:relative;overflow:hidden;background:
+    radial-gradient(circle at 30% 20%, #10203a 0%, var(--bg) 60%);}
+  svg{width:100%;height:100%;display:block;}
+  #sidebar{background:var(--panel);border-left:1px solid var(--line);
+    overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px;}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;}
+  .card h3{margin:0 0 10px 0;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .stat-row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:13px;}
+  .stat-row b{font-variant-numeric:tabular-nums;font-size:15px;}
+  #gauge-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  #gauge-label{font-size:22px;font-weight:700;}
+  #gauge-bar{width:100%;height:10px;border-radius:6px;background:#1c2740;overflow:hidden;position:relative;}
+  #gauge-fill{height:100%;width:0%;border-radius:6px;transition:width .5s ease, background .5s ease;}
+  #trace-list{list-style:none;margin:0;padding:0;max-height:220px;overflow-y:auto;}
+  #trace-list li{padding:6px 8px;border-radius:6px;font-size:12.5px;margin-bottom:4px;
+    display:flex;justify-content:space-between;background:#0c1728;border-left:3px solid var(--line);}
+  #trace-list li.d0{border-left-color:var(--red);}
+  #trace-list li.d1{border-left-color:var(--amber);}
+  #trace-list li.d2{border-left-color:var(--accent);}
+  #trace-list li span.depth{color:var(--muted);font-size:11px;}
+  #reco{font-size:13px;line-height:1.5;color:var(--text);min-height:20px;}
+  #empty-hint{color:var(--muted);font-size:13px;line-height:1.5;}
+  .tooltip{position:absolute;pointer-events:none;background:#0d1830;border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text);box-shadow:var(--shadow);
+    opacity:0;transition:opacity .1s;z-index:20;max-width:220px;}
+  .node-label{fill:var(--text);font-size:11px;font-weight:600;pointer-events:none;user-select:none;}
+  .node-sub{fill:var(--muted);font-size:9px;pointer-events:none;user-select:none;}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--muted);}
+  .legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle;}
+  #hint-banner{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    background:rgba(13,24,48,.9);border:1px solid var(--line);border-radius:20px;
+    padding:8px 18px;font-size:12.5px;color:var(--muted);pointer-events:none;transition:opacity .3s;}
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:#26365a;border-radius:4px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>RIPPLE <span>// cascade failure simulator</span></h1>
+    <div class="controls">
+      <button id="btn-sound">🔊 Sound: On</button>
+      <button id="btn-simulate" disabled>Simulate Failure</button>
+      <button id="btn-replay" disabled>Replay</button>
+      <button id="btn-reset">Reset</button>
+    </div>
+  </header>
+
+  <div id="stage-wrap">
+    <svg id="stage" viewBox="0 0 900 620" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="hint-banner">Click a node to select it, then hit "Simulate Failure" — drag nodes to rearrange</div>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+
+  <div id="sidebar">
+    <div class="card">
+      <h3>Risk Score</h3>
+      <div id="gauge-wrap">
+        <div id="gauge-label">—</div>
+        <div id="gauge-bar"><div id="gauge-fill"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Impact Summary</h3>
+      <div class="stat-row"><span>Assets affected</span><b id="stat-affected">0</b></div>
+      <div class="stat-row"><span>Cascade depth</span><b id="stat-depth">0</b></div>
+      <div class="stat-row"><span>Population impacted</span><b id="stat-pop">0</b></div>
+    </div>
+
+    <div class="card">
+      <h3>Cascade Trace</h3>
+      <ul id="trace-list"></ul>
+      <div id="empty-hint">No failure simulated yet. Select a node on the map to begin.</div>
+    </div>
+
+    <div class="card">
+      <h3>Recommended Intervention</h3>
+      <div id="reco">—</div>
+    </div>
+
+    <div class="card">
+      <h3>Legend</h3>
+      <div class="legend">
+        <span><i class="dot" style="background:#4c6280"></i>Healthy</span>
+        <span><i class="dot" style="background:var(--red)"></i>Direct failure</span>
+        <span><i class="dot" style="background:var(--amber)"></i>Cascaded</span>
+        <span><i class="dot" style="background:var(--accent)"></i>Selected</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Data model ----------
+  const nodes = [
+    {id:"power",   name:"Power Plant",       icon:"⚡", x:150, y:110, criticality:9, impact:9, pop:180000},
+    {id:"subA",    name:"Substation North",  icon:"🔌", x:340, y:90,  criticality:6, impact:6, pop:60000},
+    {id:"subB",    name:"Substation South",  icon:"🔌", x:340, y:230, criticality:6, impact:6, pop:60000},
+    {id:"water",   name:"Water Treatment",   icon:"💧", x:150, y:330, criticality:8, impact:8, pop:150000},
+    {id:"hospital",name:"General Hospital",  icon:"🏥", x:560, y:90,  criticality:10,impact:10,pop:40000},
+    {id:"comms",   name:"Comms Tower",       icon:"📡", x:560, y:280, criticality:7, impact:6, pop:120000},
+    {id:"bridge",  name:"Main Bridge",       icon:"🌉", x:150, y:500, criticality:4, impact:4, pop:30000},
+    {id:"traffic", name:"Traffic Control",   icon:"🚦", x:340, y:430, criticality:5, impact:5, pop:90000},
+    {id:"fire",    name:"Fire Station",      icon:"🚒", x:700, y:180, criticality:8, impact:7, pop:50000},
+    {id:"data",    name:"Data Center",       icon:"🖥️", x:700, y:430, criticality:6, impact:6, pop:70000},
+  ];
+
+  // directed dependency edges: from -> to  (to depends on from)
+  const edges = [
+    ["power","subA"], ["power","subB"], ["power","water"],
+    ["subA","hospital"], ["subA","comms"], ["subA","traffic"],
+    ["subB","traffic"], ["subB","fire"], ["subB","data"],
+    ["water","hospital"], ["water","fire"],
+    ["comms","data"], ["comms","fire"],
+    ["bridge","traffic"],
+  ];
+
+  const nodeById = Object.fromEntries(nodes.map(n=>[n.id,n]));
+  const adj = Object.fromEntries(nodes.map(n=>[n.id,[]]));
+  edges.forEach(([a,b])=>adj[a].push(b));
+
+  const recoText = {
+    power:"Add a backup generator tie-line to reduce single-point dependency on the main plant.",
+    subA:"Install an automatic transfer switch so Substation North can fail over to the southern grid.",
+    subB:"Add redundant feeder lines between Substation South and its dependents.",
+    water:"Fund an emergency water reserve/tanker plan for hospitals during treatment outages.",
+    hospital:"Deploy an on-site backup power and water buffer for critical care continuity.",
+    comms:"Add a secondary communications relay independent of the primary tower.",
+    bridge:"Fund an alternate-route study so traffic control has a non-bridge path.",
+    traffic:"Add battery-backed signal controllers at key intersections.",
+    fire:"Provide auxiliary power and a satellite comms fallback at the station.",
+    data:"Replicate critical data center services to an off-site or cloud failover node.",
+  };
+
+  const R = 26; // node radius
+
+  // ---------- SVG setup ----------
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("stage");
+
+  function el(tag, attrs){
+    const e = document.createElementNS(svgNS, tag);
+    for(const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  const defs = el("defs",{});
+  defs.innerHTML = `
+    <radialGradient id="nodeGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#3a4d70"/>
+      <stop offset="100%" stop-color="#1d2a45"/>
+    </radialGradient>
+    <radialGradient id="nodeGradFail" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ff8a80"/>
+      <stop offset="100%" stop-color="#b13a3a"/>
+    </radialGradient>
+    <radialGradient id="nodeGradCascade" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ffcf8a"/>
+      <stop offset="100%" stop-color="#b5772e"/>
+    </radialGradient>
+    <radialGradient id="nodeGradSel" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#8ff5ee"/>
+      <stop offset="100%" stop-color="#1f8a83"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>`;
+  svg.appendChild(defs);
+
+  const layerEdges = el("g",{id:"layer-edges"});
+  const layerFlow = el("g",{id:"layer-flow"});
+  const layerShock = el("g",{id:"layer-shock"});
+  const layerNodes = el("g",{id:"layer-nodes"});
+  svg.appendChild(layerEdges);
+  svg.appendChild(layerFlow);
+  svg.appendChild(layerShock);
+  svg.appendChild(layerNodes);
+
+  // marker for arrowheads
+  const marker = el("marker",{id:"arrow",viewBox:"0 0 10 10",refX:"9",refY:"5",
+    markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+  marker.innerHTML = `<path d="M0,0 L10,5 L0,10 z" fill="#4c6280"/>`;
+  defs.appendChild(marker);
+
+  // ---------- draw edges ----------
+  const edgeEls = {};
+  edges.forEach(([a,b],i)=>{
+    const line = el("line",{
+      x1:nodeById[a].x, y1:nodeById[a].y, x2:nodeById[b].x, y2:nodeById[b].y,
+      stroke:"#33456b", "stroke-width":2, "marker-end":"url(#arrow)"
+    });
+    layerEdges.appendChild(line);
+    edgeEls[a+"->"+b] = line;
+
+    // ambient flow particle
+    const p = el("circle",{r:3, fill:"#5fe3db", opacity:.85});
+    layerFlow.appendChild(p);
+    p._from = a; p._to = b; p._t = Math.random(); p._speed = 0.15 + Math.random()*0.1;
+    edgeEls[a+"->"+b+"_particle"] = p;
+  });
+
+  function updateEdgePositions(){
+    edges.forEach(([a,b])=>{
+      const line = edgeEls[a+"->"+b];
+      line.setAttribute("x1", nodeById[a].x);
+      line.setAttribute("y1", nodeById[a].y);
+      line.setAttribute("x2", nodeById[b].x);
+      line.setAttribute("y2", nodeById[b].y);
+    });
+  }
+
+  // ---------- draw nodes ----------
+  const nodeGroups = {};
+  nodes.forEach(n=>{
+    const g = el("g",{class:"node", transform:`translate(${n.x},${n.y})`, style:"cursor:pointer"});
+    const circle = el("circle",{r:R, fill:"url(#nodeGrad)", stroke:"#4c6280","stroke-width":2});
+    const icon = el("text",{x:0,y:6,"text-anchor":"middle",style:"font-size:20px"});
+    icon.textContent = n.icon;
+    const label = el("text",{class:"node-label", x:0, y:R+16, "text-anchor":"middle"});
+    label.textContent = n.name;
+    const statusDot = el("circle",{class:"status-dot", cx:R-6, cy:-(R-6), r:5, fill:"transparent"});
+
+    g.appendChild(circle);
+    g.appendChild(icon);
+    g.appendChild(statusDot);
+    g.appendChild(label);
+    layerNodes.appendChild(g);
+    nodeGroups[n.id] = {g, circle, statusDot};
+
+    // interactions
+    let dragging = false, offset = {x:0,y:0};
+    g.addEventListener("mousedown", (ev)=>{
+      dragging = true;
+      const pt = toSvgPoint(ev);
+      offset.x = pt.x - n.x; offset.y = pt.y - n.y;
+      ev.stopPropagation();
+    });
+    window.addEventListener("mousemove",(ev)=>{
+      if(!dragging) return;
+      const pt = toSvgPoint(ev);
+      n.x = Math.max(R+5, Math.min(900-R-5, pt.x - offset.x));
+      n.y = Math.max(R+5, Math.min(620-R-5, pt.y - offset.y));
+      g.setAttribute("transform", `translate(${n.x},${n.y})`);
+      updateEdgePositions();
+    });
+    window.addEventListener("mouseup",()=>{ dragging=false; });
+
+    g.addEventListener("click", (ev)=>{
+      if(state.animating) return;
+      selectNode(n.id);
+      ev.stopPropagation();
+    });
+
+    g.addEventListener("mouseenter", (ev)=>showTooltip(ev, n));
+    g.addEventListener("mousemove", (ev)=>positionTooltip(ev));
+    g.addEventListener("mouseleave", hideTooltip);
+  });
+
+  function toSvgPoint(ev){
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const x = (ev.clientX - rect.left) / rect.width * vb.width + vb.x;
+    const y = (ev.clientY - rect.top) / rect.height * vb.height + vb.y;
+    return {x,y};
+  }
+
+  // ---------- tooltip ----------
+  const tooltip = document.getElementById("tooltip");
+  function showTooltip(ev, n){
+    const upstream = edges.filter(([a,b])=>b===n.id).length;
+    const downstream = edges.filter(([a,b])=>a===n.id).length;
+    tooltip.innerHTML = `<b>${n.name}</b><br>Upstream deps: ${upstream}<br>Downstream deps: ${downstream}<br>Population served: ${n.pop.toLocaleString()}`;
+    tooltip.style.opacity = 1;
+    positionTooltip(ev);
+  }
+  function positionTooltip(ev){
+    const wrap = document.getElementById("stage-wrap").getBoundingClientRect();
+    tooltip.style.left = (ev.clientX - wrap.left + 16) + "px";
+    tooltip.style.top = (ev.clientY - wrap.top + 8) + "px";
+  }
+  function hideTooltip(){ tooltip.style.opacity = 0; }
+
+  // ---------- state ----------
+  const state = {
+    selected: null,
+    animating: false,
+    lastFailure: null, // {failedId, waves:[[ids]], score, affected, depth, pop}
+    soundOn: true,
+  };
+
+  function selectNode(id){
+    if(state.lastFailure) resetVisualState();
+    state.selected = id;
+    Object.entries(nodeGroups).forEach(([nid,ng])=>{
+      ng.circle.setAttribute("fill", nid===id ? "url(#nodeGradSel)" : "url(#nodeGrad)");
+      ng.circle.setAttribute("filter", nid===id ? "url(#glow)" : "");
+    });
+    document.getElementById("btn-simulate").disabled = false;
+    document.getElementById("hint-banner").textContent = `${nodeById[id].name} selected — click "Simulate Failure" to run the cascade`;
+  }
+
+  function resetVisualState(){
+    Object.values(nodeGroups).forEach(ng=>{
+      ng.circle.setAttribute("fill","url(#nodeGrad)");
+      ng.circle.setAttribute("filter","");
+      ng.statusDot.setAttribute("fill","transparent");
+      ng.g.classList.remove("shake");
+    });
+    Object.entries(edgeEls).forEach(([k,e])=>{
+      if(k.endsWith("_particle")) return;
+      e.setAttribute("stroke","#33456b");
+      e.setAttribute("stroke-width",2);
+      e.removeAttribute("stroke-dasharray");
+      e.classList.remove("edge-pulse-red","edge-pulse-amber");
+    });
+    layerShock.innerHTML = "";
+  }
+
+  // ---------- BFS cascade (cycle-safe) ----------
+  function computeCascade(startId){
+    const visited = new Set([startId]);
+    const waves = [];
+    let frontier = [startId];
+    while(frontier.length){
+      const next = [];
+      for(const cur of frontier){
+        for(const nxt of adj[cur]){
+          if(!visited.has(nxt)){
+            visited.add(nxt);
+            next.push(nxt);
+          }
+        }
+      }
+      if(next.length){ waves.push(next); frontier = next; }
+      else frontier = [];
+    }
+    return waves; // array of arrays, wave[0] = depth-1 nodes, etc.
+  }
+
+  function riskScore(startId, waves){
+    const allAffected = [startId, ...waves.flat()];
+    const depth = waves.length + 1; // +1 to avoid div by zero, counts start as depth 1
+    let sumCI = 0;
+    allAffected.forEach(id=>{
+      const n = nodeById[id];
+      sumCI += n.criticality * n.impact;
+    });
+    const score = sumCI / depth;
+    let bucket = "Low", color = "var(--green)";
+    if(score > 30){ bucket = "High"; color = "var(--red)"; }
+    else if(score >= 15){ bucket = "Medium"; color = "var(--amber)"; }
+    return {score: Math.round(score*10)/10, bucket, color, allAffected, depth: waves.length};
+  }
+
+  // ---------- Sound ----------
+  let actx = null;
+  function ensureAudio(){ if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); }
+  function beep(freq, dur, type, vol){
+    if(!state.soundOn) return;
+    ensureAudio();
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = type || "sine";
+    o.frequency.value = freq;
+    g.gain.value = vol || 0.05;
+    o.connect(g); g.connect(actx.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+    o.stop(actx.currentTime + dur);
+  }
+
+  document.getElementById("btn-sound").addEventListener("click", (e)=>{
+    state.soundOn = !state.soundOn;
+    e.target.textContent = state.soundOn ? "🔊 Sound: On" : "🔇 Sound: Off";
+  });
+
+  // ---------- Animation helpers ----------
+  function screenShake(){
+    const wrap = document.getElementById("stage-wrap");
+    wrap.style.transition = "transform 0.05s";
+    let n = 0;
+    const iv = setInterval(()=>{
+      n++;
+      const dx = (Math.random()-0.5)*8 * (1 - n/8);
+      const dy = (Math.random()-0.5)*8 * (1 - n/8);
+      wrap.style.transform = `translate(${dx}px,${dy}px)`;
+      if(n>=8){ clearInterval(iv); wrap.style.transform=""; }
+    }, 30);
+  }
+
+  function flashAt(x,y){
+    const flash = el("circle",{cx:x, cy:y, r:4, fill:"#fff", opacity:0.9});
+    layerShock.appendChild(flash);
+    let r = 4, o = 0.9;
+    const iv = setInterval(()=>{
+      r += 14; o -= 0.06;
+      flash.setAttribute("r", r);
+      flash.setAttribute("opacity", Math.max(0,o));
+      if(o<=0){ clearInterval(iv); flash.remove(); }
+    }, 20);
+  }
+
+  function shockwave(x,y,color){
+    const ring = el("circle",{cx:x, cy:y, r:R, fill:"none", stroke:color, "stroke-width":3, opacity:0.8});
+    layerShock.appendChild(ring);
+    let r = R, o = 0.8;
+    const iv = setInterval(()=>{
+      r += 4; o -= 0.02;
+      ring.setAttribute("r", r);
+      ring.setAttribute("opacity", Math.max(0,o));
+      if(o<=0){ clearInterval(iv); ring.remove(); }
+    }, 16);
+  }
+
+  function shakeNode(id){
+    const g = nodeGroups[id].g;
+    const n = nodeById[id];
+    let frames = 0;
+    const iv = setInterval(()=>{
+      frames++;
+      const dx = (Math.random()-0.5)*6*(1-frames/10);
+      const dy = (Math.random()-0.5)*6*(1-frames/10);
+      g.setAttribute("transform", `translate(${n.x+dx},${n.y+dy})`);
+      if(frames>=10){ clearInterval(iv); g.setAttribute("transform",`translate(${n.x},${n.y})`); }
+    }, 25);
+  }
+
+  function countUp(elm, from, to, dur, suffix){
+    const start = performance.now();
+    function step(now){
+      const t = Math.min(1, (now-start)/dur);
+      const eased = 1 - Math.pow(1-t, 3);
+      const val = Math.round(from + (to-from)*eased);
+      elm.textContent = val.toLocaleString() + (suffix||"");
+      if(t<1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  // ---------- Run simulation ----------
+  function runSimulation(startId, isReplay){
+    state.animating = true;
+    document.getElementById("btn-simulate").disabled = true;
+    document.getElementById("btn-replay").disabled = true;
+    document.getElementById("hint-banner").style.opacity = 0;
+    if(!isReplay) resetVisualState();
+
+    const waves = computeCascade(startId);
+    const result = riskScore(startId, waves);
+    state.lastFailure = {startId, waves, result};
+
+    // Immediate failure of start node
+    const sN = nodeById[startId];
+    nodeGroups[startId].circle.setAttribute("fill","url(#nodeGradFail)");
+    nodeGroups[startId].circle.setAttribute("filter","url(#glow)");
+    nodeGroups[startId].statusDot.setAttribute("fill", "#fff");
+    flashAt(sN.x, sN.y);
+    shockwave(sN.x, sN.y, "#ef5b5b");
+    shakeNode(startId);
+    screenShake();
+    beep(90, 0.35, "sawtooth", 0.08);
+
+    // dead edges from failed node
+    edges.forEach(([a,b])=>{
+      if(a===startId){
+        const line = edgeEls[a+"->"+b];
+        line.setAttribute("stroke","#ef5b5b");
+        line.setAttribute("stroke-width",3);
+        line.classList.add("edge-pulse-red");
+      }
+    });
+
+    const traceList = document.getElementById("trace-list");
+    document.getElementById("empty-hint").style.display = "none";
+    traceList.innerHTML = "";
+    addTraceItem(startId, 0, true);
+
+    let cumulativeDelay = 500;
+    waves.forEach((wave, waveIdx)=>{
+      setTimeout(()=>{
+        beep(220 + waveIdx*40, 0.15, "square", 0.05);
+        wave.forEach(id=>{
+          const ng = nodeGroups[id];
+          const n = nodeById[id];
+          ng.circle.setAttribute("fill","url(#nodeGradCascade)");
+          ng.statusDot.setAttribute("fill","#ffcf8a");
+          shockwave(n.x, n.y, "#f5a742");
+          shakeNode(id);
+          addTraceItem(id, waveIdx+1, false);
+
+          // mark incoming edges from previous wave / start as cascaded
+          edges.forEach(([a,b])=>{
+            if(b===id){
+              const line = edgeEls[a+"->"+b];
+              const fromFailed = (a===startId) || waves.slice(0,waveIdx).flat().includes(a) || wave.includes(a) === false && waves[waveIdx-1] && waves[waveIdx-1].includes(a);
+              line.setAttribute("stroke","#f5a742");
+              line.setAttribute("stroke-width",3);
+              line.setAttribute("stroke-dasharray","6,4");
+            }
+          });
+        });
+      }, cumulativeDelay);
+      cumulativeDelay += 550;
+    });
+
+    setTimeout(()=>{
+      // final stats
+      const gaugeLabel = document.getElementById("gauge-label");
+      const gaugeFill = document.getElementById("gauge-fill");
+      gaugeLabel.textContent = `${result.bucket} (${result.score})`;
+      gaugeLabel.style.color = result.color;
+      const pct = Math.min(100, (result.score/45)*100);
+      gaugeFill.style.width = pct + "%";
+      gaugeFill.style.background = result.color;
+
+      countUp(document.getElementById("stat-affected"), 0, result.allAffected.length, 700);
+      countUp(document.getElementById("stat-depth"), 0, result.depth, 700);
+      const pop = result.allAffected.reduce((s,id)=>s+nodeById[id].pop,0);
+      countUp(document.getElementById("stat-pop"), 0, pop, 900);
+
+      document.getElementById("reco").textContent = recoText[startId] || "Assess redundancy options for this asset.";
+      beep(520, 0.25, "sine", 0.06);
+
+      state.animating = false;
+      document.getElementById("btn-simulate").disabled = false;
+      document.getElementById("btn-replay").disabled = false;
+    }, cumulativeDelay + 200);
+  }
+
+  function addTraceItem(id, depth, isRoot){
+    const li = document.createElement("li");
+    li.className = "d" + Math.min(depth,2);
+    li.innerHTML = `<span>${isRoot?"⨯ ":"↳ "}${nodeById[id].name}</span><span class="depth">depth ${depth}</span>`;
+    document.getElementById("trace-list").appendChild(li);
+  }
+
+  // ---------- Buttons ----------
+  document.getElementById("btn-simulate").addEventListener("click", ()=>{
+    if(state.selected && !state.animating) runSimulation(state.selected, false);
+  });
+  document.getElementById("btn-replay").addEventListener("click", ()=>{
+    if(state.lastFailure && !state.animating) runSimulation(state.lastFailure.startId, true);
+  });
+  document.getElementById("btn-reset").addEventListener("click", ()=>{
+    state.selected = null;
+    state.lastFailure = null;
+    state.animating = false;
+    resetVisualState();
+    document.getElementById("btn-simulate").disabled = true;
+    document.getElementById("btn-replay").disabled = true;
+    document.getElementById("gauge-label").textContent = "—";
+    document.getElementById("gauge-label").style.color = "var(--text)";
+    document.getElementById("gauge-fill").style.width = "0%";
+    document.getElementById("stat-affected").textContent = "0";
+    document.getElementById("stat-depth").textContent = "0";
+    document.getElementById("stat-pop").textContent = "0";
+    document.getElementById("reco").textContent = "—";
+    document.getElementById("trace-list").innerHTML = "";
+    document.getElementById("empty-hint").style.display = "block";
+    document.getElementById("hint-banner").style.opacity = 1;
+    document.getElementById("hint-banner").textContent = "Click a node to select it, then hit \"Simulate Failure\" — drag nodes to rearrange";
+  });
+
+  // ---------- Ambient flow particles ----------
+  function animateFlow(){
+    edges.forEach(([a,b])=>{
+      const p = edgeEls[a+"->"+b+"_particle"];
+      const from = nodeById[a], to = nodeById[b];
+      p._t += p._speed * 0.01;
+      if(p._t > 1) p._t = 0;
+      const x = from.x + (to.x-from.x)*p._t;
+      const y = from.y + (to.y-from.y)*p._t;
+      p.setAttribute("cx", x);
+      p.setAttribute("cy", y);
+    });
+    requestAnimationFrame(animateFlow);
+  }
+  animateFlow();
+
+})();
+</script>
+</body>
+</html>
